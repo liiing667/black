@@ -24,6 +24,11 @@
   (#5395)
 - Fix unparseable output when `# fmt: skip` is placed on an opening bracket of an `if`,
   `while`, `for`, or `with` header (#5405)
+- Fix unparseable output when `# fmt: skip` follows an opening parenthesis of a
+  compound statement header and more tokens of the same statement come after the
+  parenthesized group (for example `for (  # fmt: skip` with a following `in ...`
+  clause, or `with`/`except` with an `as` clause); the whole statement is now
+  preserved instead
 - Fix crash when formatting parenthesized expressions with multiple inline comments and
   `# fmt: skip` (#5414)
 - Fix parsing Jupyter notebook assignment magics when non-ASCII characters appear

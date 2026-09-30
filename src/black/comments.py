@@ -776,6 +776,39 @@ def _find_closest_previous_sibling(node: LN) -> LN | None:
     return None
 
 
+def _ignored_nodes_end_mid_statement(statement: LN, ignored_nodes: list[LN]) -> bool:
+    """Return whether the ignored nodes stop in the middle of a statement.
+
+    A `# fmt: skip` right after an opening bracket preserves the bracketed
+    atom verbatim (e.g. the target tuple in `for (  # fmt: skip`), but any
+    tokens following it in the same statement (the `in ...` clause, a trailing
+    operator, ...) would be formatted separately, which produces unparseable
+    code. Detect that situation so the whole statement is preserved instead.
+    """
+    ignored_leaf_ids = {
+        id(ignored_leaf) for node in ignored_nodes for ignored_leaf in node.leaves()
+    }
+    bracket_depth = 0
+    seen_ignored = False
+    for statement_leaf in statement.leaves():
+        if id(statement_leaf) in ignored_leaf_ids:
+            seen_ignored = True
+        elif seen_ignored:
+            # The first leaf after the ignored region. Inside brackets a
+            # newline can safely follow the preserved text, and the colon or
+            # newline ending the statement is fine to leave to the formatter;
+            # anything else means the ignored region ends mid-statement.
+            return bracket_depth == 0 and statement_leaf.type not in (
+                token.COLON,
+                token.NEWLINE,
+            )
+        if statement_leaf.type in OPENING_BRACKETS:
+            bracket_depth += 1
+        elif statement_leaf.type in CLOSING_BRACKETS:
+            bracket_depth -= 1
+    return False
+
+
 def _generate_ignored_nodes_from_fmt_skip(
     leaf: Leaf, comment: ProtoComment, mode: Mode
 ) -> Iterator[LN]:
@@ -924,13 +957,19 @@ def _generate_ignored_nodes_from_fmt_skip(
                     bracket_depth += 1
                 elif ignored_leaf.type in CLOSING_BRACKETS:
                     bracket_depth -= 1
-        if bracket_depth > 0:
-            statement: LN = leaf
-            while statement.parent is not None and statement.parent.type not in (
-                syms.file_input,
-                syms.suite,
-            ):
-                statement = statement.parent
+        statement: LN = leaf
+        while statement.parent is not None and statement.parent.type not in (
+            syms.file_input,
+            syms.suite,
+        ):
+            statement = statement.parent
+        # Likewise, if the ignored nodes stop in the middle of the statement
+        # (e.g. `for (  # fmt: skip` where `in ...` follows the parenthesized
+        # target), formatting the remainder on its own produces unparseable
+        # code, so preserve the whole statement instead.
+        if bracket_depth > 0 or _ignored_nodes_end_mid_statement(
+            statement, ignored_nodes
+        ):
             ignored_nodes = [statement]
 
         leaf_is_ignored = any(
